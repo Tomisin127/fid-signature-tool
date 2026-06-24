@@ -8,7 +8,6 @@ import {
   createWalletClient,
   createPublicClient,
   custom,
-  publicActions,
   parseAbi,
   http,
   type Address,
@@ -467,6 +466,26 @@ export function FarcasterSignatureTool() {
           }
         }
 
+        // Re-request the active account. Switching networks can cause some
+        // in-app wallets (Base App / Toshi) to re-scope authorization, which
+        // otherwise surfaces as "method/account not authorized" (4100) on send.
+        const authorized = (await provider.request({
+          method: 'eth_requestAccounts',
+        })) as string[];
+
+        const live = authorized?.find(
+          (a) => a.toLowerCase() === account.toLowerCase()
+        );
+
+        if (!live) {
+          throw new Error(
+            `Your wallet's active account does not match the FID owner address (${account}). In Base App / Toshi, switch to the account that owns this FID and try again.`
+          );
+        }
+
+        // Use the wallet's checksummed authorized account as the sender.
+        account = live as Address;
+
         client = createWalletClient({
           chain: optimism,
           transport: custom(provider),
@@ -499,13 +518,15 @@ export function FarcasterSignatureTool() {
       setTxHash(hash);
       setTxStatus('pending');
 
-      // Wait for confirmation
-      const publicClient = createWalletClient({
+      // Wait for confirmation over an Optimism HTTP RPC. This must NOT depend on
+      // window.ethereum, otherwise the private-key path (which has no injected
+      // wallet) throws "e.transport is not a function".
+      const confirmClient = createPublicClient({
         chain: optimism,
-        transport: custom(window.ethereum!),
-      }).extend(publicActions);
+        transport: http(),
+      });
 
-      const receipt = await publicClient.waitForTransactionReceipt({ hash });
+      const receipt = await confirmClient.waitForTransactionReceipt({ hash });
       setTxStatus(receipt.status === 'success' ? 'confirmed' : 'failed');
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Transaction failed';

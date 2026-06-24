@@ -81,13 +81,15 @@ export function FarcasterSignatureTool() {
       setFidOwnerAddress(userAddress);
       setFidOwnerConnected(true);
 
-      // Fetch FID for this address
-      const client = createWalletClient({
+      // Fetch FID for this address. The Farcaster IdRegistry lives on Optimism,
+      // so always read from an Optimism RPC instead of routing through the
+      // wallet's currently selected chain (which may be Base, etc.).
+      const publicClient = createPublicClient({
         chain: optimism,
-        transport: custom(window.ethereum!),
-      }).extend(publicActions);
+        transport: http(),
+      });
 
-      const fid = await client.readContract({
+      const fid = await publicClient.readContract({
         address: ID_REGISTRY_ADDRESS,
         abi: ID_REGISTRY_ABI,
         functionName: 'idOf',
@@ -96,6 +98,10 @@ export function FarcasterSignatureTool() {
 
       if (Number(fid) > 0) {
         setCurrentFid(Number(fid));
+      } else {
+        setError(
+          'No Farcaster FID is registered to this address on Optimism. Make sure you connected the wallet that owns the FID.'
+        );
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to connect wallet');
@@ -123,11 +129,12 @@ export function FarcasterSignatureTool() {
       setFidOwnerAddress(account.address);
       setFidOwnerConnected(true);
 
-      // Fetch FID for this address using public RPC
+      // Fetch FID for this address using an Optimism public RPC
       try {
-        const client = createWalletClient({
+        const client = createPublicClient({
           chain: optimism,
-        }).extend(publicActions);
+          transport: http(),
+        });
 
         console.log('[v0] Fetching FID for address:', account.address);
         
@@ -228,11 +235,11 @@ export function FarcasterSignatureTool() {
         );
         recipientAddr = account.address;
 
-        // Fetch nonce for this address
-        const client = createWalletClient({
+        // Fetch nonce for this address from an Optimism public RPC
+        const client = createPublicClient({
           chain: optimism,
-          transport: custom(window.ethereum!),
-        }).extend(publicActions);
+          transport: http(),
+        });
 
         const nonceResult = await client.readContract({
           address: ID_REGISTRY_ADDRESS,

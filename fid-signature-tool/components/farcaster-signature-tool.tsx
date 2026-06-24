@@ -405,32 +405,73 @@ export function FarcasterSignatureTool() {
         client = createWalletClient({
           chain: optimism,
           account: pkeyAccount,
+          transport: http(),
         });
       } else {
         // Execute with connected wallet
         account = fidOwnerAddress!;
-        client = createWalletClient({
-          chain: optimism,
-          transport: custom(window.ethereum!),
-          account,
-        });
 
         // Ensure the wallet is on Optimism (the IdRegistry lives on OP Mainnet).
-        // Wallets like Base App / Toshi often default to Base (8453).
-        const currentChainId = await client.getChainId();
-        if (currentChainId !== optimism.id) {
+        // Wallets like Base App / Toshi often default to Base (8453) and may
+        // resolve switch requests asynchronously, so we drive the switch on the
+        // raw provider and then poll until it actually reports Optimism.
+        const provider = window.ethereum!;
+        const optimismHex = `0x${optimism.id.toString(16)}`; // 0xa
+
+        const readChainId = async () => {
+          const hex = (await provider.request({ method: 'eth_chainId' })) as string;
+          return Number.parseInt(hex, 16);
+        };
+
+        let activeChainId = await readChainId();
+        if (activeChainId !== optimism.id) {
           try {
-            await client.switchChain({ id: optimism.id });
+            await provider.request({
+              method: 'wallet_switchEthereumChain',
+              params: [{ chainId: optimismHex }],
+            });
           } catch (switchErr: any) {
             // 4902 = chain not added to the wallet yet; add it then switch.
             if (switchErr?.code === 4902 || switchErr?.cause?.code === 4902) {
-              await client.addChain({ chain: optimism });
-              await client.switchChain({ id: optimism.id });
+              await provider.request({
+                method: 'wallet_addEthereumChain',
+                params: [
+                  {
+                    chainId: optimismHex,
+                    chainName: 'OP Mainnet',
+                    nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
+                    rpcUrls: ['https://mainnet.optimism.io'],
+                    blockExplorerUrls: ['https://optimistic.etherscan.io'],
+                  },
+                ],
+              });
+              await provider.request({
+                method: 'wallet_switchEthereumChain',
+                params: [{ chainId: optimismHex }],
+              });
             } else {
               throw switchErr;
             }
           }
+
+          // Poll until the provider actually reports Optimism (up to ~5s).
+          for (let i = 0; i < 10 && activeChainId !== optimism.id; i++) {
+            await new Promise((resolve) => setTimeout(resolve, 500));
+            activeChainId = await readChainId();
+          }
+
+          if (activeChainId !== optimism.id) {
+            throw new Error(
+              'Please switch your wallet network to OP Mainnet (Optimism) and try again. Some in-app wallets (Base App / Toshi) require switching the network manually.'
+            );
+          }
         }
+
+        client = createWalletClient({
+          chain: optimism,
+          transport: custom(provider),
+          account,
+        });
       }
 
       console.log('[v0] Executing transferAndChangeRecovery with:', {

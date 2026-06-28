@@ -25,8 +25,49 @@ const ID_REGISTRY_ABI = parseAbi([
   'function idOf(address addr) public view returns (uint256)',
 ]);
 
-// No signature extraction needed - just use the raw signature from the wallet
-// The wallet should return properly formatted signatures
+// Extract raw signature from potentially ABI-encoded data
+// BaseApp may return the signature wrapped in ABI encoding
+const extractSignatureBytes = (data: string): string => {
+  if (!data || data === '0x') return data;
+  
+  // If it's a normal signature (65 bytes = 130 hex chars), return as-is
+  if (data.startsWith('0x') && data.length === 132) {
+    return data;
+  }
+  
+  // If it's longer, it might be ABI-encoded
+  if (data.length > 500) {
+    console.log('[v0] Detected long signature, extracting raw bytes...');
+    try {
+      // ABI-encoded dynamic bytes format: offset (32 bytes) + length (32 bytes) + data
+      // offset is always 0x0000000000000000000000000000000000000000000000000000000000000020 for single dynamic bytes
+      // followed by length in next 32 bytes
+      // then the actual bytes
+      
+      if (data.startsWith('0x0000000000000000000000000000000000000000000000000000000000000020')) {
+        // Skip the offset (64 chars after 0x)
+        const afterOffset = data.slice(66);
+        // Next 64 chars is the length
+        const lengthHex = afterOffset.slice(0, 64);
+        const length = parseInt(lengthHex, 16);
+        console.log('[v0] Length from ABI encoding:', length);
+        
+        // The actual data starts after the length field
+        // length is in bytes, so we need length * 2 hex chars
+        const dataStart = 66 + 64;
+        const rawSignature = '0x' + afterOffset.slice(64, 64 + length * 2);
+        
+        console.log('[v0] Extracted signature length:', rawSignature.length);
+        return rawSignature;
+      }
+    } catch (e) {
+      console.log('[v0] Extraction failed:', e instanceof Error ? e.message : e);
+    }
+  }
+  
+  console.log('[v0] Using signature as-is');
+  return data;
+};
 
 interface TransferData {
   recipientAddress: Address;
@@ -281,10 +322,22 @@ export function FarcasterSignatureTool() {
           },
         });
 
-        console.log('[v0] Signature from private key:', {
+        console.log('[v0] Raw signature from private key:', {
           length: signature.length,
-          value: signature.slice(0, 100),
+          start: signature.slice(0, 50),
         });
+
+        // Extract the actual signature bytes if it's ABI-encoded
+        const extractedSignature = extractSignatureBytes(signature);
+
+        console.log('[v0] After extraction:', {
+          length: extractedSignature.length,
+          start: extractedSignature.slice(0, 50),
+        });
+
+        if (!extractedSignature || extractedSignature === '0x') {
+          throw new Error('Failed to extract signature from private key');
+        }
 
         setTransferData({
           recipientAddress: recipientAddr,
@@ -292,7 +345,7 @@ export function FarcasterSignatureTool() {
           currentFid: currentFid!,
           recoveryAddress: recoveryAddress as Address,
           deadline,
-          signature,
+          signature: extractedSignature,
         });
         setRecipientSignedWithPrivateKey(true);
       } else {
@@ -366,11 +419,22 @@ export function FarcasterSignatureTool() {
             throw new Error('Wallet returned empty signature');
           }
 
-          console.log('[v0] Signature received from wallet:', {
-            type: typeof signature,
+          console.log('[v0] Raw signature from wallet:', {
             length: (signature as string).length,
-            value: (signature as string).slice(0, 100),
+            start: (signature as string).slice(0, 50),
           });
+
+          // Extract the actual signature bytes if it's ABI-encoded
+          const extractedSignature = extractSignatureBytes(signature as string);
+
+          console.log('[v0] After extraction:', {
+            length: extractedSignature.length,
+            start: extractedSignature.slice(0, 50),
+          });
+
+          if (!extractedSignature || extractedSignature === '0x') {
+            throw new Error('Failed to extract signature from wallet response');
+          }
 
           setTransferData({
             recipientAddress: recipientAddr,
@@ -378,7 +442,7 @@ export function FarcasterSignatureTool() {
             currentFid: currentFid!,
             recoveryAddress: recoveryAddress as Address,
             deadline,
-            signature: signature as string,
+            signature: extractedSignature,
           });
           setRecipientSignedWithPrivateKey(false);
         } catch (walletErr) {

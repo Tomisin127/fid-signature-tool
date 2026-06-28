@@ -336,6 +336,11 @@ export function FarcasterSignatureTool() {
           },
         });
 
+        console.log('[v0] Signature from private key:', {
+          length: signature.length,
+          value: signature.slice(0, 100),
+        });
+
         setTransferData({
           recipientAddress: recipientAddr,
           recipientNonce: nonce,
@@ -411,13 +416,19 @@ export function FarcasterSignatureTool() {
           ],
         });
 
+        console.log('[v0] Signature received from wallet:', {
+          type: typeof signature,
+          length: (signature as string)?.length,
+          value: (signature as string)?.slice(0, 100),
+        });
+
         setTransferData({
           recipientAddress: recipientAddr,
           recipientNonce: nonce,
           currentFid: currentFid!,
           recoveryAddress: recoveryAddress as Address,
           deadline,
-          signature,
+          signature: signature as string,
         });
         setRecipientSignedWithPrivateKey(false);
       }
@@ -552,7 +563,21 @@ export function FarcasterSignatureTool() {
       }
 
       // Extract and decode signature if it's ABI-encoded
+      console.log('[v0] Before extract - transferData.signature:', {
+        type: typeof transferData.signature,
+        length: transferData.signature?.length,
+        isEmpty: transferData.signature === '0x',
+        value: transferData.signature?.slice(0, 50),
+      });
+
       const finalSignature = extractSignatureData(transferData.signature);
+
+      console.log('[v0] After extract - finalSignature:', {
+        type: typeof finalSignature,
+        length: finalSignature?.length,
+        isEmpty: finalSignature === '0x',
+        value: finalSignature?.slice(0, 50),
+      });
 
       console.log('[v0] Executing transferAndChangeRecovery with:', {
         to: transferData.recipientAddress,
